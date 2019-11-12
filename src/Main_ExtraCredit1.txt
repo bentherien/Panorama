@@ -1,0 +1,118 @@
+//
+//  tester.cpp
+//  OpenCV-Template
+//
+//  Created by Benjamin Therien on 2019-03-19.
+//  Copyright © 2019 Benjamin Therien. All rights reserved.
+//
+
+#include "CornerDescriptor.cpp"
+#include <stdio.h>
+#include <opencv2/opencv.hpp>
+#include <opencv2/xfeatures2d.hpp>
+#include <cmath>
+#include <iostream>
+#include <unistd.h>
+#include <vector>
+
+
+using namespace std;
+using namespace cv;
+
+
+
+Mat matrixMul( Mat H, Mat H1);
+
+int main()
+{
+    
+    string image1Path = "../../../../project_images/Rainier1.png";
+    Mat img_1 = imread(image1Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image2Path = "../../../../project_images/Rainier2.png";
+    Mat img_2 = imread(image2Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image3Path = "../../../../project_images/Rainier3.png";
+    Mat img_3 = imread(image3Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image4Path = "../../../../project_images/Rainier4.png";
+    Mat img_4 = imread(image4Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image5Path = "../../../../project_images/Rainier5.png";
+    Mat img_5 = imread(image5Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image6Path = "../../../../project_images/Rainier6.png";
+    Mat img_6 = imread(image6Path, CV_LOAD_IMAGE_COLOR);
+    
+    
+    double cThresh = 88, mAThresh = .5, mDThresh = 1, dThresh = 2, iterNum = 5000 ;
+    
+    //double cThresh = 88, mAThresh = .5, mDThresh = 1, dThresh = 2, iterNum = 5000;
+ 
+    
+    //imshow("image", pano(img_4, img_3, cThresh, iterNum, dThresh, mAThresh, mDThresh,  false));
+    //waitKey(0);
+    
+    bool a =false;
+    
+
+    map<String, Mat> oneTo2 = getHoms(img_1, img_2, cThresh,iterNum, dThresh, mAThresh, mDThresh, a);
+    map<String, Mat> oneTo3 = getHoms(img_1, img_3, cThresh,iterNum, dThresh, mAThresh, mDThresh, a);
+    map<String, Mat> threeTo4 = getHoms(img_3, img_4, cThresh,iterNum, dThresh, mAThresh, mDThresh, a);
+    map<String, Mat> oneTo5 = getHoms(img_1, img_5, cThresh,iterNum, dThresh, mAThresh, mDThresh, a);
+    map<String, Mat> oneTo6 = getHoms(img_1, img_6, cThresh,iterNum, dThresh, mAThresh, mDThresh, a);
+    
+    vector<toStitch> images;
+    
+    images.push_back(toStitch(img_2, oneTo2["HomInv"] ));
+    images.push_back(toStitch(img_3, oneTo3["HomInv"] ));
+    images.push_back(toStitch(img_4, oneTo3["HomInv"] * threeTo4["HomInv"] ));
+    images.push_back(toStitch(img_5, oneTo5["HomInv"] ));
+    images.push_back(toStitch(img_6, oneTo6["HomInv"] ));
+    
+    
+    StitchedInfo SI = stitchMultiple(img_1 , images);
+    
+    cout<<"done homs"<<endl;
+    addTo(SI, img_1);
+    cout<<"done addto"<<endl;
+    projectInto(SI, img_2, oneTo2["Hom"]);
+    cout<<"done project1"<<endl;
+    projectInto(SI, img_3, oneTo3["Hom"]);
+    cout<<"done project2"<<endl;
+    projectInto(SI, img_4, oneTo3["Hom"] * threeTo4["Hom"]);
+    cout<<"done project3"<<endl;
+    projectInto(SI, img_5,  oneTo5["Hom"] );
+    cout<<"done project4"<<endl;
+    projectInto(SI, img_6,  oneTo6["Hom"] );
+    
+    
+    imshow("image",SI.StitchedImage);
+    imwrite("/Users/BenjaminTherien/Desktop/COMP499_Project/allStitched3.png",SI.StitchedImage);
+    waitKey(0);
+    
+
+    return 0;
+}
+
+
+
+Mat matrixMul( Mat H, Mat H1)
+{
+    //setVars
+    Mat product(H1);
+    //Implement Matrix Mul
+    for(int r=0; r<3 ; r++)
+    {
+        double temp=0;
+        for(int c=0; c<3 ; c++)
+        {
+            for(int i=0; i<3 ; i++)
+            {
+                temp = temp + H.at<double>(r,i)* H1.at<double>(i,c);
+            }
+            product.at<double>(r,c) = temp;
+        }
+    }
+    return product;
+}

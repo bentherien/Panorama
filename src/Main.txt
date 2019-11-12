@@ -1,0 +1,910 @@
+///Users/BenjaminTherien/Library/Developer/Xcode/DerivedData/OpenCV-Template-gmnsfdlglwlorvdaaufwdievsdmn/Build/Products/Debug
+#include <stdio.h>
+#include <unistd.h>
+#include <opencv2/opencv.hpp>
+#include <opencv2/xfeatures2d.hpp>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+
+using namespace std;
+using namespace cv;
+
+int thresh = 95;
+int max_thresh = 255;
+
+double globDist =1 ;
+double globIter =200 ;
+double globMDF = 10;
+
+String source_window = "Source image";
+String corners_window = "Corners detected";
+
+//Structs
+
+//this struct is used to provide information pertaining to image stitching as well as the stithed image
+struct StitchedInfo{Mat StitchedImage; Point2f norm;};
+//this struct is used when computing multiple homographies
+struct toStitch
+{
+    Mat image, HomToCenter;
+    toStitch(Mat i, Mat h)
+    {
+        image = i;
+        HomToCenter = h;
+    }
+};
+
+
+
+
+// Function headers
+
+
+vector<KeyPoint> cornerHarris_demo( int, void*, Mat img );
+Point2f project(double x , double y, Mat H);
+inline double distance(Point2f a,Point2f b);
+inline bool isInArr(int x, int *a, int size);
+void getInliers(Mat H, vector<Point2f> matches1,vector<Point2f> matches2, double threshold,vector<Point2f> &inliers1,vector<Point2f> &inliers2);
+map<String, Mat> ransac(vector<Point2f> matches1,vector<Point2f> matches2, double threshold, int iterationCount,int displacement, double MDFThreshold);
+Point2f* getCorners(Mat image);
+vector<Point2f> getProjectedCornersVec(Mat cornerInterest, Mat H);
+map<String, Point2f> getCornersVec(Mat image, vector<Point2f> projectedCorners);
+StitchedInfo getStitchedImage(Mat image1, Mat image2, Mat HomInv);
+void addTo(StitchedInfo& SI, Mat image1);
+void projectInto(StitchedInfo& SI, Mat image2, Mat HomInv);
+Vec3b getInterpolatedValue(Vec3b v1, Vec3b v2);
+Mat Stitch(Mat img_1,Mat img_2, map<String, Mat> Homographies);
+Mat pano(Mat img_1, Mat img_2);
+map<String, Point2f> combine(vector<Point2f> extremas);
+map<String, Mat> getHoms(Mat img_1, Mat img_2, double len, int iterations,double MDFThreshold);
+map<String, Mat> getSHoms(Mat img_1, Mat img_2, double len, int iterations, double MDFThreshold);
+StitchedInfo stitchMultiple(Mat image1 , vector<toStitch> ims);
+Mat matrixMul( Mat H, Mat H1);
+inline double offsetDistance(Point2f a,Point2f b, int displacement);
+
+
+
+//this struct is used to implement the median pass filter
+struct MFHolder
+{
+    int colDisplacement;
+    double length, angle;
+    MFHolder();
+    
+    MFHolder(int displacement, Point2f a, Point2f b)
+    {
+        colDisplacement = displacement;
+        length = offsetDistance(a, b, displacement);
+        angle = asin(sqrt(pow(length ,2 ) - pow(abs(a.x - b.x -displacement),2))/length );
+    };
+};
+
+inline MFHolder getStats(Point2f a,Point2f b, int displacement);
+
+//
+ /** @function main */
+/**
+int main(){
+
+//setup some variables
+   
+    
+    string image1Path = "../../../../project_images/Rainier1.png";
+    Mat img_1 = imread(image1Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image2Path = "../../../../project_images/Rainier2.png";
+    Mat img_2 = imread(image2Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image3Path = "../../../../project_images/Rainier3.png";
+    Mat img_3 = imread(image3Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image4Path = "../../../../project_images/Rainier4.png";
+    Mat img_4 = imread(image4Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image5Path = "../../../../project_images/Rainier5.png";
+    Mat img_5 = imread(image5Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image6Path = "../../../../project_images/Rainier6.png";
+    Mat img_6 = imread(image6Path, CV_LOAD_IMAGE_COLOR);
+    
+    //string image7Path = "/Users/BenjaminTherien/Documents/ComputerVision/FinalProject/project_images/4.png";
+   // Mat img_7 = imread(image7Path, CV_LOAD_IMAGE_COLOR);
+    
+    //map<String, Mat> twoTo6 = getSHoms(img_2, img_6, 1, 225, 5);
+    string s1 = "/Users/BenjaminTherien/Desktop/s1.JPG";
+    Mat img_s1 = imread(s1, CV_LOAD_IMAGE_COLOR);
+    string s2 = "/Users/BenjaminTherien/Desktop/s2.JPG";
+    Mat img_s2 = imread(s2, CV_LOAD_IMAGE_COLOR);
+    Mat dS1, dS2;
+    
+    pyrDown( img_s1, dS1, Size( img_s1.cols/2, img_s1.rows/2 ));
+    pyrDown( img_s2, dS2, Size( img_s2.cols/2, img_s2.rows/2 ));
+    pyrDown( dS1, img_s1, Size( dS1.cols/2, dS1.rows/2 ));
+    pyrDown( dS2, img_s2, Size( dS2.cols/2, dS2.rows/2 ));
+    pyrDown( img_s1, dS1, Size( img_s1.cols/2, img_s1.rows/2 ));
+    pyrDown( img_s2, dS2, Size( img_s2.cols/2, img_s2.rows/2 ));
+    
+    imshow("image", pano(dS2, dS1));
+    waitKey(0);
+
+    
+    map<String, Mat> oneTo5 = getSHoms(img_1, img_5, 1, 200,10);
+    map<String, Mat> fiveTo3 = getSHoms(img_5, img_3, 1, 200,10);
+    map<String, Mat> threeTo4 = getHoms(img_3, img_4, 1, 200,10);
+    map<String, Mat> oneTo2 = getHoms(img_1, img_2, 1, 200,10);
+    map<String, Mat> twoTo6 = getHoms(img_2, img_6, 1, 225, 10);
+    
+    vector<toStitch> images;
+    images.push_back(toStitch(img_2, oneTo2["HomInv"] ));
+    images.push_back(toStitch(img_3, matrixMul(oneTo5["HomInv"] , fiveTo3["HomInv"] )));
+    //images.push_back(toStitch(img_4, oneTo5["HomInv"] * fiveTo3["HomInv"] * threeTo4["HomInv"] ));
+    //images.push_back(toStitch(img_5, oneTo5["HomInv"] ));
+    //images.push_back(toStitch(img_6, oneTo2["HomInv"] * twoTo6["HomInv"] ));
+    
+    StitchedInfo SI = stitchMultiple(img_1 , images);
+    
+    cout<<"done homs"<<endl;
+    addTo(SI, img_1);
+    cout<<"done addto"<<endl;
+    projectInto(SI, img_2, oneTo2["Hom"]);
+    cout<<"done project"<<endl;
+    projectInto(SI, img_3, oneTo5["Hom"] * fiveTo3["Hom"]);
+    //projectInto(SI, img_4, oneTo5["Hom"] * fiveTo3["Hom"] * threeTo4["Hom"]);
+    //projectInto(SI, img_5,  oneTo5["Hom"] );
+    //projectInto(SI, img_6,  oneTo2["Hom"] * twoTo6["Hom"] );
+    
+    
+    imshow("image",SI.StitchedImage);
+   // imwrite("/Users/BenjaminTherien/Desktop/COMP499_Project/allStitched1.png",SI.StitchedImage);
+    waitKey(0);
+    
+    return 0;
+}
+*/
+
+//leave
+
+
+
+
+
+
+
+
+
+
+
+
+// this space
+
+
+
+
+
+
+
+
+
+
+
+
+// ALONE
+
+
+/**
+ Harris Corner detector is below
+ */
+
+
+/** @function cornerHarris_demo */
+vector<KeyPoint> cornerHarris_demo( int, void*, Mat img )
+{
+    
+    Mat dst, dst_norm, dst_norm_scaled, src_grey;
+    dst = Mat::zeros( img.size(), CV_32FC1 );
+    
+    
+    cvtColor( img, src_grey, CV_BGR2GRAY );
+    
+    /// Detector parameters
+    int blockSize = 2;
+    int apertureSize = 3;
+    double k = 0.04;
+    
+    /// Detecting corners
+    cornerHarris( src_grey, dst, blockSize, apertureSize, k, BORDER_DEFAULT );
+    
+    /// Normalizing
+    normalize( dst, dst_norm, 0, 255, NORM_MINMAX, CV_32FC1, Mat() );
+    convertScaleAbs( dst_norm, dst_norm_scaled );
+    
+    
+    vector<KeyPoint> keypoints;
+    
+    /// Adding Keypoints
+    for( int j = 0; j < dst_norm.rows ; j++ )
+    {
+        for( int i = 0; i < dst_norm.cols; i++ )
+        {
+            if( (int) dst_norm.at<float>(j,i) > thresh )
+            {
+                keypoints.push_back(*new KeyPoint( i, j, 1, -1, 0, 0, -1));
+            }
+        }
+    }
+    
+    return keypoints;
+    
+}
+
+
+/**
+RANSAC HELPER FUNCTIONS START HERE
+ */
+
+Mat matrixMul( Mat H, Mat H1)
+{
+    //setVars
+    Mat product(H1);
+    //Implement Matrix Mul
+    for(int r=0; r<3 ; r++)
+    {
+        double temp=0;
+        for(int c=0; c<3 ; c++)
+        {
+            for(int i=0; i<3 ; i++)
+            {
+                temp = temp + H.at<double>(r,i)* H1.at<double>(i,c);
+            }
+            product.at<double>(r,c) = temp;
+        }
+    }
+    return product;
+}
+/**
+ @function Project
+ @input: Homography, and coordinate set
+ @output:
+ 
+ THIS FUNCTION NEEDS ERROR CHECKING FOR EMPTY H
+ */
+Point2f project(double x, double y, Mat H)
+{
+    //setVars
+    Mat vec = Mat(3,1, H.type()), result = Mat(3,1, H.type());
+    vec.at<double>(0,0) = x;
+    vec.at<double>(0,1) = y;
+    vec.at<double>(0,2) = 1;
+    
+    //Implement Matrix Mul
+    for(int r=0; r<3 ; r++)
+    {
+        float temp=0;
+        for(int c=0; c<3 ; c++)
+        {
+            temp = temp + H.at<double>(r,c)* vec.at<double>(0,c);
+        }
+        result.at<double>(0,r) = temp;
+    }
+    
+    //Normalize
+    double normalize = result.at<double>(0,2);
+    result.at<double>(0,0) = result.at<double>(0,0)/normalize;
+    result.at<double>(0,1) = result.at<double>(0,1)/normalize;
+    return Point2f(result.at<double>(0,0),result.at<double>(0,1));
+}
+/**
+ @function computeInlierCount
+ @input: Homography, matches, threshold
+ @output: number of points that lie a threshold distance away from their projected counterparts
+ */
+int computeInlierCount(Mat H, vector<Point2f> matches1,vector<Point2f> matches2, double thresh)
+{
+    int iCount=0;
+    if(matches1.size() <= matches2.size())
+    {
+        vector<Point2f>::iterator it1, it2;
+        it2= matches2.begin();
+        for(it1 = matches1.begin(); it1<matches1.end();it1++)
+        {
+            if(distance(project(it1->x,it1->y,H),*it2) <thresh)
+                iCount++;
+            it2++;
+        }
+    }
+    else
+    {
+        cout<<"error in computeInlierCount"<<endl;
+        return -1;
+    }
+    return iCount;
+}
+
+/**
+ @function getInliers:
+ this nasty function return a vector of inliers, these are match inlier where the first half belong to i1 and
+ the second half belong to i2
+ */
+void getInliers(Mat H, vector<Point2f> matches1,vector<Point2f> matches2, double threshold,vector<Point2f> &inliers1,vector<Point2f> &inliers2)
+{
+    if(H.rows==0 || H.cols==0)
+    {
+        cout<<"Homography not found"<<endl;
+    }
+    vector<Point2f>::iterator it1, it2;
+    int iCount=0;
+    if(matches1.size() <= matches2.size())
+    {
+        it2= matches2.begin();
+        for(it1 = matches1.begin(); it1<matches1.end();it1++)
+        {
+            if(distance(project(it1->x,it1->y,H),*it2) < threshold)
+            {
+                iCount++;
+                inliers1.push_back(*it1);
+                inliers2.push_back(*it2);
+                
+            }
+            it2++;
+        }
+    }
+}
+
+/** @function distance
+euclidean distance between 2 points in a 2d coordinate system
+*/
+inline double distance(Point2f a,Point2f b)
+{
+    return sqrt(pow(a.x-b.x,2) + pow(a.y-b.y,2));
+}
+
+inline double offsetDistance(Point2f a,Point2f b, int displacement)
+{
+      return sqrt(pow(a.x-b.x-displacement,2) + pow(a.y-b.y,2));
+}
+
+inline MFHolder getStats(Point2f a,Point2f b, int displacement)
+{
+    return MFHolder(displacement, a, b );
+}
+
+bool medianDistanceFilter(double *arr, int size, int threshold)
+{
+    sort(arr,arr+size);
+    int medIndex = (size/2) -1;
+    for(int i=0; i< size; i++)
+    {
+       // cout<<arr[i] - arr[medIndex]<<endl;
+       if(arr[i] - arr[medIndex] > threshold)
+           return false;
+    }
+    return true;
+}
+
+//the entire algorithm assumes that the arguments, especially matches 1 and 2 are well formatted
+map<String, Mat> ransac(vector<Point2f> matches1,vector<Point2f> matches2, double threshold, int iterationCount,int displacement, double MDFThreshold)
+{
+    //init necessary data structures
+    int* helper= new int[4];
+    unsigned long numMatches = matches1.size();
+    Point2f assocMatches[numMatches][2];
+    int maxInlierCount=0, maxInlierIndex=-1;
+    Mat Homographies[iterationCount];
+    bool passed =false;
+    
+    
+    vector<Point2f> randomSapleI1, randomSapleI2;
+    vector<Point2f>::iterator it1, it2;
+    it1 = matches1.begin();
+    it2 = matches2.begin();
+
+    //sets up array of associated matches to facilitate randomization
+    for(int i=0; i<matches1.size(); i++)
+    {
+        assocMatches[i][0] = *it1;
+        assocMatches[i][1] = *it2;
+        it1++;
+        it2++;
+    }
+    
+    
+    
+    
+    
+    //find inlier
+    for(int i=0; i<iterationCount; i++)
+    {
+        randomSapleI1.clear();
+        randomSapleI2.clear();
+        int count=0;
+        passed=false;
+        //get vects of random matching points:
+       while(!passed)
+       {
+           double distances[4];
+           //MFHolder toFilter[4];
+            while(count<4)
+            {
+                int x = rand() % numMatches;
+                if(!isInArr(x, helper, count))
+                {
+                    helper[count] = x;
+                    randomSapleI1.push_back(assocMatches[x][0]);
+                    randomSapleI2.push_back(assocMatches[x][1]);
+                    distances[count]=offsetDistance(assocMatches[x][0],assocMatches[x][1], displacement);
+                }
+                else
+                {
+                    count--;
+                }
+                count++;
+            }
+           count=0;
+           passed = medianDistanceFilter(distances, 4, MDFThreshold);
+       }
+        Mat Homography = findHomography(randomSapleI1, randomSapleI2, 0);
+        int tempCount = computeInlierCount(Homography, matches1, matches2, threshold);
+        Homographies[i] = Homography;
+        if(tempCount > maxInlierCount)
+        {
+            maxInlierCount = tempCount;
+            maxInlierIndex = i;
+        }
+    }
+    
+    //compute the best homography on all inliers
+    randomSapleI1.clear();
+    randomSapleI2.clear();
+    getInliers(Homographies[maxInlierIndex], matches1, matches2, thresh,randomSapleI1, randomSapleI2);
+    map<String, Mat> homs;
+    homs["Hom"] = findHomography(randomSapleI1, randomSapleI2, 0);
+    homs["HomInv"] = findHomography(randomSapleI2, randomSapleI1, 0);
+    if(homs["Hom"].rows==0 || homs["Hom"].cols==0)
+    {
+        cout<<"Homography not found"<<endl;
+    }
+    if(homs["HomInv"].rows==0 || homs["HomInv"].cols==0)
+    {
+        cout<<"Inverse Homography not found"<<endl;
+    }
+    
+    return homs;
+    
+}
+
+/** @function
+ @input: array and value
+ @output: bool true if value is in array, false otherwise
+ */
+bool isInArr(int x, int *a, int size)
+{
+    for(int i=0; i<size; i++)
+    {
+        if(x == a[i])
+            return true;
+    }
+    return false;
+}
+
+
+
+
+/**
+ IMAGE STITICHING FUNCTIONS START HERE
+ */
+
+
+/** @function getCorners but it returns a vector
+* HELPER TO
+*/
+vector<Point2f> getCornersVec(Mat image)
+{
+    vector<Point2f> corners;
+    corners.push_back(Point2f(0,0));
+    corners.push_back(Point2f(image.cols,0));
+    corners.push_back(Point2f(0,image.rows));
+    corners.push_back(Point2f(image.cols,image.rows));
+    return corners;
+}
+
+/** @function getProjectedCorners returns  */
+vector<Point2f> getProjectedCornersVec(Mat cornerInterest, Mat H)
+{
+    vector<Point2f> corners = getCornersVec(cornerInterest), projectedCorners;
+    vector<Point2f>::iterator it;
+    
+    for(it= corners.begin(); it<corners.end(); it++)
+    {
+        projectedCorners.push_back(project(it->x,it->y, H));
+    }
+    return projectedCorners;
+}
+
+
+/** @function gets the corners of the englobing image  */
+map<String, Point2f> getCornersVec(Mat image1,  Mat image2, Mat HomInv)
+{
+    vector<Point2f> image2Corners = getProjectedCornersVec(image2, HomInv);
+    vector<Point2f> image1Corners = getCornersVec(image1);
+    vector<Point2f>::iterator it1 ,it2;
+    int maxX=0, minX=0, maxY=0, minY=0;
+    
+    //find the max and min values for x, y for all the corners of both images
+    for(it1= image1Corners.begin(), it2=image2Corners.begin(); it1<image1Corners.end(); it1++, it2++)
+    {
+        if(it1->x > maxX)
+            maxX = it1->x;
+        if(it2->x > maxX)
+             maxX = it2->x;
+        if(it1->y > maxY)
+            maxY = it1->y;
+        if(it2->y > maxY)
+            maxY = it2->y;
+        if(it1->x < minX)
+            minX = it1->x;
+        if(it2->x < minX)
+            minX = it2->x;
+        if(it1->y < minY)
+            minY = it1->y;
+        if(it2->y < minY)
+            minY = it2->y;
+    }
+    map<String, Point2f> newCorners;
+    newCorners["Min"] = Point2f(minX,minY);
+    newCorners["Max"] = Point2f(maxX,maxY);
+    return newCorners;
+}
+
+StitchedInfo getStitchedImage(Mat image1, Mat image2, Mat HomInv)
+{
+    map<String, Point2f> dimensions = getCornersVec(image1, image2, HomInv);
+    Mat stitchedImage(abs(dimensions["Max"].y-dimensions["Min"].y),
+                      abs(dimensions["Max"].x-dimensions["Min"].x), image1.type());
+    StitchedInfo st;
+    st.StitchedImage =stitchedImage;
+    st.norm = Point2f(dimensions["Min"].x, dimensions["Min"].y);
+    return st;
+}
+
+void addTo(StitchedInfo& SI, Mat image1)
+{
+    for(int r = 0; r< image1.rows; r++)
+    {
+        for(int c = 0; c< image1.cols; c++)
+        {
+            SI.StitchedImage.at<Vec3b>(r-SI.norm.y,c-SI.norm.x) = image1.at<Vec3b>(r,c);
+        }
+    }
+}
+
+void projectInto(StitchedInfo& SI, Mat image2, Mat Hom)
+{
+    for(int r = SI.norm.y; r < SI.StitchedImage.rows+SI.norm.y; r++)
+    {
+        for(int c = SI.norm.x; c < SI.StitchedImage.cols+SI.norm.x; c++)
+        {
+            Point2f temp = project(c,r, Hom);
+            if(0<=temp.y && temp.y<image2.rows && 0<=temp.x && temp.x<image2.cols)
+            {
+                Mat output;
+                if(SI.StitchedImage.at<Vec3b>(r-SI.norm.y,c-SI.norm.x) == Vec3b(0,0,0))
+                {
+                    getRectSubPix(image2, Size_<float>(1, 1), temp, output);
+                    SI.StitchedImage.at<Vec3b>(r-SI.norm.y,c-SI.norm.x)= output.at<Vec3b>(0,0);
+                }
+                else
+                {
+                    getRectSubPix(image2, Size_<float>(1, 1), temp, output);
+                    SI.StitchedImage.at<Vec3b>(r-SI.norm.y,c-SI.norm.x)= getInterpolatedValue(output.at<Vec3b>(0,0),SI.StitchedImage.at<Vec3b>(r-SI.norm.y,c-SI.norm.x));
+                }
+            }
+        }
+    }
+}
+
+Vec3b getInterpolatedValue(Vec3b v1, Vec3b v2)
+{
+    int g=0, r=0, b=0;
+    g = (v1[0]+v2[0])/2;
+    r = (v1[1]+v2[1])/2;
+    b = (v1[2]+v2[2])/2;
+    return Vec3b(g,r,b);
+}
+
+Mat Stitch(Mat img_1,Mat img_2, map<String, Mat> Homographies)
+{
+    StitchedInfo Stitched = getStitchedImage(img_1, img_2, Homographies["HomInv"]);
+    addTo(Stitched, img_1);
+    projectInto(Stitched, img_2, Homographies["Hom"]);
+    return Stitched.StitchedImage;
+}
+
+/**
+ * The following function returns the homography between 2 images using ransac
+ */
+map<String, Mat> getSHoms(Mat img_1, Mat img_2, double len, int iterations, double MDFThreshold)
+{
+    
+    cv::Ptr<Feature2D> f2d = xfeatures2d::SIFT::create();
+    
+    Mat siftMatches(img_1);
+    
+    //-- Step 1: Detect the keypoints:
+    vector<KeyPoint> keypoints_1, keypoints_2;
+    keypoints_1 = cornerHarris_demo(0,0,img_1);
+    keypoints_2 = cornerHarris_demo(0,0,img_2);
+    
+    cout<<"corners Done with: i1 = "<<keypoints_1.size() << " and  I2 = "<<keypoints_2.size()<<endl;
+    
+    //-- Step 2: Calculate descriptors (feature vectors)
+    Mat descriptors_1, descriptors_2;
+    f2d->compute( img_1, keypoints_1, descriptors_1 );
+    f2d->compute( img_2, keypoints_2, descriptors_2 );
+    
+    
+    //-- Step 3: Matching descriptor vectors using BFMatcher :
+    BFMatcher matcher;
+    vector< DMatch > matches;
+    matcher.match( descriptors_1, descriptors_2, matches);
+    
+    drawMatches(img_1, keypoints_1, img_2, keypoints_2, matches, siftMatches);
+    
+    imshow("matches", siftMatches);
+    waitKey(0);
+    
+    /*
+     * Corner Detection and Feature matching above
+     * Homography computation and more below
+     **/
+    
+    
+    vector<Point2f> matchPoints_1, matchPoints_2;
+    
+    for( int i = 0; i < matches.size(); i++)
+    {
+        matchPoints_1.push_back( keypoints_1[ matches[i].queryIdx ].pt);
+        matchPoints_2.push_back( keypoints_2[ matches[i].trainIdx ].pt);
+    }
+    
+    /*
+     * Get the inliers of the homography computed from ransac
+     * Then Display
+     **/
+    
+    vector<Point2f>inliers1, inliers2;
+    vector<Point2f>::iterator it1, it2;
+    vector<DMatch> inlierMatches;
+    keypoints_1.clear();
+    keypoints_2.clear();
+    //get homogaphy
+    map<String, Mat> Homographies = ransac(matchPoints_1, matchPoints_2, len , iterations, img_1.cols, MDFThreshold);
+    Mat ransacMatches(img_1);
+    getInliers(Homographies["Hom"], matchPoints_1, matchPoints_2, 10, inliers1, inliers2);
+    
+    
+    int count=0;
+    //it2=inliers2.begin();
+    for(it1 = inliers1.begin(),it2=inliers2.begin(); it1< inliers1.end(); it1++,it2++,count++)
+    {
+        inlierMatches.push_back(DMatch(count, count, 0));
+        keypoints_1.push_back(KeyPoint(it1->x,it1->y, 1, -1, 0, 0, -1));
+        keypoints_2.push_back(KeyPoint(it2->x,it2->y, 1, -1, 0, 0, -1));
+    }
+    
+    drawMatches(img_1, keypoints_1, img_2, keypoints_2, inlierMatches, ransacMatches);
+    imshow("matches after ransac", ransacMatches);
+    waitKey(0);
+    
+    return Homographies;
+}
+
+map<String, Mat> getHoms(Mat img_1, Mat img_2, double len, int iterations, double MDFThreshold)
+{
+    
+    cv::Ptr<Feature2D> f2d = xfeatures2d::SIFT::create();
+    
+    Mat siftMatches(img_1);
+    
+    //-- Step 1: Detect the keypoints:
+    vector<KeyPoint> keypoints_1, keypoints_2;
+    keypoints_1 = cornerHarris_demo(0,0,img_1);
+    keypoints_2 = cornerHarris_demo(0,0,img_2);
+    
+    cout<<"corners Done with: i1 = "<<keypoints_1.size() << " and  I2 = " << keypoints_2.size()<<endl;
+    
+    //-- Step 2: Calculate descriptors (feature vectors)
+    Mat descriptors_1, descriptors_2;
+    f2d->compute( img_1, keypoints_1, descriptors_1 );
+    f2d->compute( img_2, keypoints_2, descriptors_2 );
+    
+    
+    //-- Step 3: Matching descriptor vectors using BFMatcher :
+    BFMatcher matcher;
+    vector< DMatch > matches;
+    matcher.match( descriptors_1, descriptors_2, matches);
+    
+    drawMatches(img_1, keypoints_1, img_2, keypoints_2, matches, siftMatches);
+    
+    //imshow("matches", siftMatches);
+    //waitKey(0);
+    
+    /*
+     * Corner Detection and Feature matching above
+     * Homography computation and more below
+     **/
+    
+    
+    vector<Point2f> matchPoints_1, matchPoints_2;
+    
+    for( int i = 0; i < matches.size(); i++)
+    {
+        matchPoints_1.push_back( keypoints_1[ matches[i].queryIdx ].pt);
+        matchPoints_2.push_back( keypoints_2[ matches[i].trainIdx ].pt);
+    }
+    
+    /*
+     * Get the inliers of the homography computed from ransac
+     * Then Display
+     **/
+    
+    vector<Point2f>inliers1, inliers2;
+    vector<Point2f>::iterator it1, it2;
+    vector<DMatch> inlierMatches;
+    keypoints_1.clear();
+    keypoints_2.clear();
+    //get homogaphy
+    map<String, Mat> Homographies = ransac(matchPoints_1, matchPoints_2, len , iterations, img_1.cols, MDFThreshold);
+    Mat ransacMatches(img_1);
+    getInliers(Homographies["Hom"], matchPoints_1, matchPoints_2, 10, inliers1, inliers2);
+    
+    
+    int count=0;
+    //it2=inliers2.begin();
+    for(it1 = inliers1.begin(),it2=inliers2.begin(); it1< inliers1.end(); it1++,it2++,count++)
+    {
+        inlierMatches.push_back(DMatch(count, count, 0));
+        keypoints_1.push_back(KeyPoint(it1->x,it1->y, 1, -1, 0, 0, -1));
+        keypoints_2.push_back(KeyPoint(it2->x,it2->y, 1, -1, 0, 0, -1));
+    }
+    
+    drawMatches(img_1, keypoints_1, img_2, keypoints_2, inlierMatches, ransacMatches);
+    //imshow("matches after ransac", ransacMatches);
+    //waitKey(0);
+    
+    return Homographies;
+}
+
+/**
+ * The following functions returns a panorama of the 2 images
+ *
+ */
+
+Mat pano(Mat img_1, Mat img_2)
+{
+    
+    cv::Ptr<Feature2D> f2d = xfeatures2d::SIFT::create();
+    
+    Mat siftMatches(img_1);
+    
+    //-- Step 1: Detect the keypoints:
+    vector<KeyPoint> keypoints_1, keypoints_2;
+    keypoints_1 = cornerHarris_demo(0,0,img_1);
+    keypoints_2 = cornerHarris_demo(0,0,img_2);
+    
+    cout<<"corners Done with: i1 = "<<keypoints_1.size() << " and  I2 = "<<keypoints_2.size()<<endl;
+    
+    //-- Step 2: Calculate descriptors (feature vectors)
+    Mat descriptors_1, descriptors_2;
+    f2d->compute( img_1, keypoints_1, descriptors_1 );
+    f2d->compute( img_2, keypoints_2, descriptors_2 );
+    
+    
+    //-- Step 3: Matching descriptor vectors using BFMatcher :
+    BFMatcher matcher;
+    vector< DMatch > matches;
+    matcher.match( descriptors_1, descriptors_2, matches);
+    
+    drawMatches(img_1, keypoints_1, img_2, keypoints_2, matches, siftMatches);
+    
+    imshow("matches", siftMatches);
+    waitKey(0);
+    
+    /*
+     * Corner Detection and Feature matching above
+     * Homography computation and more below
+     **/
+    
+    
+    vector<Point2f> matchPoints_1, matchPoints_2;
+    
+    for( int i = 0; i < matches.size(); i++)
+    {
+        matchPoints_1.push_back( keypoints_1[ matches[i].queryIdx ].pt);
+        matchPoints_2.push_back( keypoints_2[ matches[i].trainIdx ].pt);
+    }
+    
+    /*
+     * Get the inliers of the homography computed from ransac
+     * Then Display
+     **/
+    
+    vector<Point2f>inliers1, inliers2;
+    vector<Point2f>::iterator it1, it2;
+    vector<DMatch> inlierMatches;
+    keypoints_1.clear();
+    keypoints_2.clear();
+    //get homogaphy
+    map<String, Mat> Homographies = ransac(matchPoints_1, matchPoints_2, globDist , globIter, img_1.cols, globMDF);
+    Mat ransacMatches(img_1);
+    getInliers(Homographies["Hom"], matchPoints_1, matchPoints_2, 10, inliers1, inliers2);
+    
+    
+    int count=0;
+    //it2=inliers2.begin();
+    for(it1 = inliers1.begin(),it2=inliers2.begin(); it1< inliers1.end(); it1++,it2++,count++)
+    {
+        inlierMatches.push_back(DMatch(count, count, 0));
+        keypoints_1.push_back(KeyPoint(it1->x,it1->y, 1, -1, 0, 0, -1));
+        keypoints_2.push_back(KeyPoint(it2->x,it2->y, 1, -1, 0, 0, -1));
+    }
+    
+    drawMatches(img_1, keypoints_1, img_2, keypoints_2, inlierMatches, ransacMatches);
+    imshow("matches", ransacMatches);
+    waitKey(0);
+    
+    /**
+     * Let the stitching BEGIN!!!
+     */
+    
+    return Stitch(img_1,img_2,Homographies);
+    
+}
+
+StitchedInfo stitchMultiple(Mat image1 , vector<toStitch> ims)
+{
+    vector<Point2f> extremas;
+    map<String, Point2f> temp;
+    vector<toStitch>::iterator it;
+    for(it= ims.begin(); it< ims.end(); it++)
+    {
+        temp = getCornersVec(image1, it->image, it->HomToCenter);
+        extremas.push_back(temp["Max"]);
+        extremas.push_back(temp["Min"]);
+    }
+    
+    map<String, Point2f> dimensions = combine(extremas);
+    Mat stitchedImage(abs(dimensions["Max"].y-dimensions["Min"].y),
+                      abs(dimensions["Max"].x-dimensions["Min"].x), image1.type());
+    StitchedInfo st;
+    st.StitchedImage =stitchedImage;
+    st.norm = Point2f(dimensions["Min"].x, dimensions["Min"].y);
+    
+    return st;
+}
+
+map<String, Point2f> combine(vector<Point2f> extremas)
+{
+    vector<Point2f>::iterator it;
+    int maxX= 0 , maxY=0, minX=0, minY=0;
+    
+    for(it= extremas.begin(); it < extremas.end(); it++)
+    {
+        if(it->x > maxX)
+            maxX = it->x;
+        if(it->y > maxY)
+            maxY = it->y;
+        if(it->x < minX)
+            minX = it->x;
+        if(it->y < minY)
+            minY = it->y;
+    }
+    map<String, Point2f> extrs;
+    extrs["Min"] = Point2f(minX,minY);
+    extrs["Max"] = Point2f(maxX,maxY);
+    
+    return extrs;
+    
+    
+}

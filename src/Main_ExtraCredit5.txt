@@ -1,0 +1,40 @@
+//
+//  ProjectUGradMain.cpp
+//  OpenCV-Template
+//
+//  Created by Benjamin Therien on 2019-03-24.
+//  Copyright © 2019 Benjamin Therien. All rights reserved.
+//
+
+#include "CornerDescriptor.cpp"
+#include <stdio.h>
+#include <opencv2/opencv.hpp>
+#include <opencv2/xfeatures2d.hpp>
+#include <cmath>
+#include <iostream>
+#include <unistd.h>
+#include <vector>
+
+
+using namespace std;
+using namespace cv;
+
+int main()
+{
+    
+    string image1Path = "../../../../project_images/Hanging1.png";
+    Mat img_1 = imread(image1Path, CV_LOAD_IMAGE_COLOR);
+    
+    string image2Path = "../../../../project_images/Hanging2.png";
+    Mat img_2 = imread(image2Path, CV_LOAD_IMAGE_COLOR);
+ 
+    
+    //Parameters for Corner Harris, SIFT, and
+    double cThresh = 80, mAThresh = .25, mDThresh = .5, dThresh = 1, iterNum = 1000;
+    bool showMatching = true;
+    
+    imshow("2-Image Panorama", pano(img_1, img_2, cThresh, iterNum, dThresh,  mAThresh, mDThresh,  showMatching));
+    waitKey(0);
+    
+    return 0;
+}
